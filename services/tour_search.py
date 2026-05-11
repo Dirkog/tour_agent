@@ -6,6 +6,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from services.flight_search import search_flights, city_to_iata
@@ -40,11 +41,20 @@ class TourPackage:
     # Исходные параметры поиска (для offer_composer)
     search_params: dict = field(default_factory=dict)
 
+    @property
+    def flight_link(self) -> str:
+        """Ссылка на авиабилет."""
+        return self.flight.get("link", "")
+
+    @property
+    def hotel_link(self) -> str:
+        """Ссылка на отель."""
+        return self.hotel.get("link", "")
+
 
 async def search_tours(params: dict) -> list[TourPackage]:
     """
     Главная функция поиска тура. Используется в handlers/search.py.
-    Алиас для search_tour для обратной совместимости.
 
     :param params: Параметры поиска (из NL Processor или FSM)
     :return: Список TourPackage (до MAX_RESULTS)
@@ -89,7 +99,7 @@ async def search_tour(params: dict) -> list[TourPackage]:
     )
 
     logger.info(
-        "Параллельный поиск: рейсы %s→%s (%s-%s), отели в %s",
+        "Параллельный поиск: рейсы %s→%s (%s — %s), отели в %s",
         origin_iata, destination_iata, date_from, date_to, destination_city,
     )
 
@@ -115,13 +125,18 @@ async def search_tour(params: dict) -> list[TourPackage]:
         return_exceptions=True,
     )
 
-    flights = results[0] if not isinstance(results[0], Exception) else []
-    hotels = results[1] if not isinstance(results[1], Exception) else []
+    flights: list[dict] = []
+    hotels: list[dict] = []
 
     if isinstance(results[0], Exception):
         logger.error("Ошибка поиска рейсов: %s", results[0])
+    else:
+        flights = results[0]
+
     if isinstance(results[1], Exception):
         logger.error("Ошибка поиска отелей: %s", results[1])
+    else:
+        hotels = results[1]
 
     logger.info("Найдено рейсов: %d, отелей: %d", len(flights), len(hotels))
 
@@ -168,6 +183,7 @@ def _combine_into_packages(
 
     # Только отели (нет рейсов)
     if not flights:
+        logger.info("Рейсы не найдены, формируем пакеты только с отелями")
         for hotel in hotels[:MAX_RESULTS]:
             total = hotel.get("priceAvg") or hotel.get("price", 0)
             if budget and total > budget:
@@ -176,7 +192,7 @@ def _combine_into_packages(
                 index=index,
                 flight={},
                 hotel=hotel,
-                total_price=total,
+                total_price=int(total),
                 nights=nights,
                 search_params=params,
             ))
@@ -185,6 +201,7 @@ def _combine_into_packages(
 
     # Только рейсы (нет отелей)
     if not hotels:
+        logger.info("Отели не найдены, формируем пакеты только с рейсами")
         for flight in flights[:MAX_RESULTS]:
             total = flight.get("price", 0)
             if budget and total > budget:
@@ -193,7 +210,7 @@ def _combine_into_packages(
                 index=index,
                 flight=flight,
                 hotel={},
-                total_price=total,
+                total_price=int(total),
                 nights=nights,
                 search_params=params,
             ))
@@ -205,7 +222,7 @@ def _combine_into_packages(
 
     for flight in flights:
         flight_price = flight.get("price", 0)
-        best_hotel: tuple[int, dict] | None = None
+        best_hotel_tuple: tuple[int, dict] | None = None
         best_score = -1.0
 
         for hi, hotel in enumerate(hotels):
@@ -227,15 +244,18 @@ def _combine_into_packages(
 
             if score > best_score:
                 best_score = score
-                best_hotel = (hi, hotel)
+                best_hotel_tuple = (hi, hotel)
 
         # Если в бюджете ничего не нашли — берём самый дешёвый отель
-        if best_hotel is None and hotels:
-            cheapest = min(hotels, key=lambda h: h.get("priceAvg") or h.get("price", 999_999))
-            best_hotel = (hotels.index(cheapest), cheapest)
+        if best_hotel_tuple is None and hotels:
+            cheapest = min(
+                hotels,
+                key=lambda h: h.get("priceAvg") or h.get("price", 999_999)
+            )
+            best_hotel_tuple = (hotels.index(cheapest), cheapest)
 
-        if best_hotel:
-            hi, hotel = best_hotel
+        if best_hotel_tuple:
+            hi, hotel = best_hotel_tuple
             used_hotel_indices.add(hi)
             hotel_price = hotel.get("priceAvg") or hotel.get("price", 0)
             total_price = flight_price + hotel_price
@@ -244,7 +264,7 @@ def _combine_into_packages(
                 index=index,
                 flight=flight,
                 hotel=hotel,
-                total_price=total_price,
+                total_price=int(total_price),
                 nights=nights,
                 search_params=params,
             ))
@@ -256,31 +276,27 @@ def _combine_into_packages(
         h_stars = h.get("stars", 3) or 3
         h_rating = h.get("rating", 70) or 70
         price = pkg.total_price or 1
-        return -(h_stars * h_rating) / price
+        return -(h_stars * h_rating) / price  # Минус для сортировки по убыванию
 
     packages.sort(key=sort_key)
     return packages
 
 
-def _get_departure_iata(params: dict) -> str:
+def _get_departure_iata(params: dict) -> str | None:
     """
     Определяет IATA код города вылета из параметров.
-    Дефолт: MOW (Москва).
 
     :param params: Параметры поиска
-    :return: IATA код (всегда возвращает строку)
+    :return: IATA код или None
     """
+    # Из параметров NLP или FSM
     iata = params.get("departure_iata")
     if iata and len(str(iata)) == 3:
         return str(iata).upper()
 
-    city = params.get("departure_city", "")
-    if city:
-        result = city_to_iata(city)
-        if result:
-            return result
-
-    return "MOW"  # Москва по умолчанию
+    # По названию города
+    city = params.get("departure_city", "Москва")
+    return city_to_iata(city) or "MOW"
 
 
 def _get_destination_iata(params: dict) -> str | None:
@@ -290,24 +306,24 @@ def _get_destination_iata(params: dict) -> str | None:
     :param params: Параметры поиска
     :return: IATA код или None
     """
-    # Приоритет: явный IATA от NLP
+    # Из параметров NLP
     iata = params.get("destination_iata")
     if iata and len(str(iata)) == 3:
         return str(iata).upper()
 
-    # Из названия города
-    city = params.get("destination_city", "")
+    # По городу назначения
+    city = params.get("destination_city")
     if city:
-        result = city_to_iata(city)
-        if result:
-            return result
+        code = city_to_iata(city)
+        if code:
+            return code
 
-    # Из названия страны
-    country = params.get("destination_country", "")
+    # По стране назначения
+    country = params.get("destination_country")
     if country:
-        result = city_to_iata(country)
-        if result:
-            return result
+        code = city_to_iata(country)
+        if code:
+            return code
 
     return None
 
@@ -316,14 +332,13 @@ def _calc_nights(date_from: str, date_to: str) -> int:
     """
     Вычисляет количество ночей между датами.
 
-    :param date_from: Дата вылета (YYYY-MM-DD)
-    :param date_to: Дата возврата (YYYY-MM-DD)
-    :return: Количество ночей (минимум 1)
+    :param date_from: Дата начала (YYYY-MM-DD)
+    :param date_to: Дата конца (YYYY-MM-DD)
+    :return: Количество ночей (минимум 0)
     """
     try:
-        from datetime import date
         d1 = date.fromisoformat(date_from)
         d2 = date.fromisoformat(date_to)
-        return max(1, (d2 - d1).days)
+        return max(0, (d2 - d1).days)
     except (ValueError, TypeError):
         return 7  # По умолчанию неделя

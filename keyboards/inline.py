@@ -53,6 +53,8 @@ def kb_popular_countries() -> InlineKeyboardMarkup:
         ("🇬🇪 Грузия", "country_Georgia_GE"),
         ("🇮🇳 Индия (Гоа)", "country_India_IN"),
         ("🇨🇾 Кипр", "country_Cyprus_CY"),
+        ("🇻🇳 Вьетнам", "country_Vietnam_VN"),
+        ("🇲🇦 Марокко", "country_Morocco_MA"),
     ]
     for name, data in countries:
         builder.button(text=name, callback_data=data)
@@ -95,6 +97,10 @@ def kb_date_shortcuts() -> InlineKeyboardMarkup:
         (
             "📅 Через 2 месяца, 14 ночей",
             f"dates_{(today + timedelta(60)).isoformat()}_{(today + timedelta(74)).isoformat()}"
+        ),
+        (
+            "📅 Через 3 месяца, 10 ночей",
+            f"dates_{(today + timedelta(90)).isoformat()}_{(today + timedelta(100)).isoformat()}"
         ),
     ]
 
@@ -220,6 +226,8 @@ def kb_departure_cities() -> InlineKeyboardMarkup:
         ("✈️ Новосибирск", "depart_OVB"),
         ("✈️ Уфа", "depart_UFA"),
         ("✈️ Краснодар", "depart_KRR"),
+        ("✈️ Самара", "depart_KUF"),
+        ("✈️ Пермь", "depart_PEE"),
     ]
     for name, data in cities:
         builder.button(text=name, callback_data=data)
@@ -238,10 +246,10 @@ def kb_confirm_search() -> InlineKeyboardMarkup:
     """Кнопки подтверждения или изменения параметров поиска."""
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🔍 Начать поиск", callback_data="search_start"),
-        InlineKeyboardButton(text="✏️ Изменить", callback_data="search_edit"),
+        InlineKeyboardButton(text="🔍 Искать туры!", callback_data="search_start"),
     )
     builder.row(
+        InlineKeyboardButton(text="✏️ Изменить параметры", callback_data="search_edit"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="search_cancel"),
     )
     return builder.as_markup()
@@ -251,34 +259,32 @@ def kb_confirm_search() -> InlineKeyboardMarkup:
 # РЕЗУЛЬТАТЫ ПОИСКА
 # =====================================================
 
-def kb_tour_result(tour_index: int, has_link: bool = False) -> InlineKeyboardMarkup:
+def kb_tour_result(tour_index: int, has_link: bool = True) -> InlineKeyboardMarkup:
     """
-    Клавиатура для карточки результата поиска.
+    Кнопки под карточкой результата поиска.
 
-    :param tour_index: Индекс тура в списке результатов
-    :param has_link: Есть ли прямая ссылка на бронирование
+    :param tour_index: Индекс тура в списке результатов (0-based)
+    :param has_link: Есть ли ссылка на бронирование
+    :return: InlineKeyboardMarkup
     """
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
             text="📋 Сформировать предложение",
-            callback_data=f"compose_offer_{tour_index}"
+            callback_data=f"compose_offer_{tour_index}",
         )
     )
     if has_link:
         builder.row(
             InlineKeyboardButton(
-                text="✈️ Aviasales",
-                callback_data=f"open_flight_{tour_index}"
+                text="✈️ Билеты",
+                callback_data=f"open_flight_{tour_index}",
             ),
             InlineKeyboardButton(
-                text="🏨 Hotellook",
-                callback_data=f"open_hotel_{tour_index}"
+                text="🏨 Отель",
+                callback_data=f"open_hotel_{tour_index}",
             ),
         )
-    builder.row(
-        InlineKeyboardButton(text="🔍 Новый поиск", callback_data="new_search"),
-    )
     return builder.as_markup()
 
 
@@ -287,6 +293,8 @@ def kb_new_search() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔍 Новый поиск", callback_data="new_search"),
+    )
+    builder.row(
         InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"),
     )
     return builder.as_markup()
@@ -298,37 +306,25 @@ def kb_new_search() -> InlineKeyboardMarkup:
 
 def kb_offer_actions(tour_index: int) -> InlineKeyboardMarkup:
     """
-    Кнопки для работы с готовым коммерческим предложением.
+    Кнопки действий с готовым коммерческим предложением.
 
-    :param tour_index: Индекс тура для идентификации предложения
+    :param tour_index: Индекс тура (для корректного callback_data)
+    :return: InlineKeyboardMarkup
     """
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
             text="✅ Отправить клиенту",
-            callback_data=f"offer_send_{tour_index}"
+            callback_data=f"offer_send_{tour_index}",
         )
     )
     builder.row(
         InlineKeyboardButton(
             text="✏️ Редактировать",
-            callback_data=f"offer_edit_{tour_index}"
-        ),
-        InlineKeyboardButton(
-            text="🔍 Новый поиск",
-            callback_data="new_search"
-        ),
+            callback_data=f"offer_edit_{tour_index}",
+        )
     )
-    return builder.as_markup()
-
-
-def kb_after_offer() -> InlineKeyboardMarkup:
-    """Клавиатура после работы с предложением."""
-    builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔍 Новый поиск", callback_data="new_search"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"),
     )
     return builder.as_markup()

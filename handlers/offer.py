@@ -1,7 +1,8 @@
 """
 Обработчик работы с готовым коммерческим предложением.
 Формирует, редактирует и выводит предложение агенту.
-Агент сам решает, пересылать ли его клиенту. Бот никогда не пишет клиентам напрямую.
+Агент сам решает, пересылать ли его клиенту.
+Бот НИКОГДА не пишет клиентам напрямую.
 """
 import logging
 import re
@@ -33,8 +34,8 @@ _composed_offers: dict[tuple[int, int], str] = {}
 async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Запускает формирование коммерческого предложения.
-    Получает тур из результатов поиска, добавляет погоду, курсы валют,
-    визовую информацию и применяет стиль агента.
+    Получает тур из результатов поиска, добавляет погоду,
+    курсы валют, визовую информацию и применяет стиль агента.
     """
     # Импорт здесь, чтобы избежать циклических зависимостей
     from handlers.search import get_search_results
@@ -60,7 +61,7 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
 
     # Уведомляем о начале формирования
     status_msg = await callback.message.answer(
-        "📋 <b>Формирую предложение...</b>\n\n"
+        "📋 Формирую предложение... \n\n"
         "⏳ Запрашиваю:\n"
         "• 🌤 OpenWeatherMap — погода на даты\n"
         "• 💱 ЦБ РФ — актуальные курсы валют\n"
@@ -77,7 +78,7 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
             exc_info=True,
         )
         await status_msg.edit_text(
-            "❌ <b>Не удалось сформировать предложение</b>\n\n"
+            "❌ Не удалось сформировать предложение \n\n"
             "Возможная причина: временная недоступность API.\n"
             "Попробуйте через несколько минут.",
             reply_markup=kb_new_search(),
@@ -94,9 +95,9 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
     except Exception:
         pass
 
-    # ── Выводим предложение агенту ──────────────────────────────────
+    # ── Выводим предложение агенту ────────────────────────────────────
     await callback.message.answer(
-        "✅ <b>Предложение сформировано!</b>\n\n"
+        "✅ Предложение сформировано! \n\n"
         "Проверьте перед отправкой клиенту."
     )
 
@@ -154,9 +155,9 @@ async def handle_offer_send(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await callback.message.answer(
-        "📤 <b>Скопируйте текст ниже и отправьте клиенту:</b>\n\n"
-        "<i>(Бот не отправляет сообщения клиентам напрямую "
-        "— только вы решаете, что и кому пересылать)</i>"
+        "📤 Скопируйте текст ниже и отправьте клиенту: \n\n"
+        " (Бот не отправляет сообщения клиентам напрямую "
+        "— только вы решаете, что и кому пересылать) "
     )
 
     # Выводим чистый текст без HTML-тегов для удобного копирования
@@ -171,7 +172,7 @@ async def handle_offer_send(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer(clean_text, disable_web_page_preview=True)
 
     await callback.message.answer(
-        "✅ Текст скопирован? Отправьте его клиенту в удобном мессенджере.\n\n"
+        "✅ Текст готов для копирования. Отправьте его клиенту в удобном мессенджере.\n\n"
         "🔍 Хотите найти другие варианты?",
         reply_markup=kb_new_search(),
     )
@@ -198,10 +199,10 @@ async def handle_offer_edit(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(editing_tour_index=tour_index)
 
     await callback.message.answer(
-        "✏️ <b>Режим редактирования</b>\n\n"
+        "✏️ Режим редактирования \n\n"
         "Введите или вставьте отредактированный текст предложения.\n"
         "Бот запомнит ваш стиль и будет использовать его в следующих предложениях.\n\n"
-        "<i>Для отмены напишите /cancel</i>"
+        " Для отмены напишите /cancel "
     )
     await callback.answer()
 
@@ -237,14 +238,13 @@ async def handle_edited_offer(message: Message, state: FSMContext) -> None:
     try:
         learn_from_text(user_id, edited_text)
         style_summary = get_style_summary(user_id)
-        style_info = f"\n\n🎨 <b>Стиль обновлён:</b>\n{style_summary}"
+        style_info = f"\n\n🎨 Стиль обновлён: \n{style_summary}"
     except Exception as exc:
         logger.warning("Ошибка обновления стиля: %s", exc)
 
     await state.clear()
-
     await message.answer(
-        f"✅ <b>Предложение обновлено</b>{style_info}\n\n"
+        f"✅ Предложение обновлено {style_info}\n\n"
         "Хотите отправить клиенту?",
         reply_markup=kb_offer_actions(tour_index),
     )
@@ -271,9 +271,9 @@ async def handle_open_flight(callback: CallbackQuery) -> None:
         link = flight.get("link", "")
         if link:
             await callback.message.answer(
-                f"✈️ <b>Ссылка на авиабилет (Aviasales):</b>\n{link}\n\n"
-                "<i>⚠️ Цена актуальна на момент поиска. "
-                "При бронировании проверьте текущую стоимость.</i>"
+                f"✈️ Ссылка на авиабилет (Aviasales): \n{link}\n\n"
+                " ⚠️ Цена актуальна на момент поиска. "
+                "При бронировании проверьте текущую стоимость. "
             )
             await callback.answer()
             return
@@ -298,8 +298,8 @@ async def handle_open_hotel(callback: CallbackQuery) -> None:
         link = hotel.get("link", "")
         if link:
             await callback.message.answer(
-                f"🏨 <b>Ссылка на отель (Hotellook):</b>\n{link}\n\n"
-                "<i>⚠️ Наличие мест и цена актуальны на момент поиска.</i>"
+                f"🏨 Ссылка на отель (Hotellook): \n{link}\n\n"
+                " ⚠️ Наличие мест и цена актуальны на момент поиска. "
             )
             await callback.answer()
             return
@@ -326,12 +326,19 @@ def _split_text(text: str, max_len: int = 4000) -> list[str]:
     current = ""
 
     for line in text.split("\n"):
-        if len(current) + len(line) + 1 > max_len:
+        # Если добавление строки превышает лимит — сохраняем текущую часть
+        test = current + "\n" + line if current else line
+        if len(test) > max_len:
             if current:
                 parts.append(current.strip())
-            current = line
+            # Если одна строка длиннее лимита — режем принудительно
+            if len(line) > max_len:
+                parts.append(line[:max_len])
+                current = ""
+            else:
+                current = line
         else:
-            current = current + "\n" + line if current else line
+            current = test
 
     if current:
         parts.append(current.strip())

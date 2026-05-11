@@ -1,6 +1,6 @@
 """
 Точка входа Telegram-бота для турагентов.
-Запуск: python bot/main.py
+Запуск: python main.py
 
 Использует aiogram 3.x, Long Polling, aiosqlite, NVIDIA NIM.
 """
@@ -65,6 +65,7 @@ def setup_logging() -> None:
     # Снижаем уровень для aiogram (слишком много DEBUG-сообщений)
     logging.getLogger("aiogram").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 async def main() -> None:
@@ -75,7 +76,7 @@ async def main() -> None:
     logger = logging.getLogger(__name__)
 
     logger.info("=" * 60)
-    logger.info("Запуск бота для турагентов v1.0")
+    logger.info("Запуск бота для турагентов v1.1")
     logger.info("=" * 60)
 
     # ── Проверка конфигурации ──────────────────────────────────────
@@ -138,7 +139,13 @@ async def main() -> None:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(
             bot,
-            allowed_updates=dp.resolve_used_update_types(),
+            # Явно указываем типы обновлений, включая голосовые сообщения
+            allowed_updates=[
+                "message",
+                "callback_query",
+                "inline_query",
+                "chosen_inline_result",
+            ],
         )
     except Exception as exc:
         logger.exception("Критическая ошибка в polling: %s", exc)

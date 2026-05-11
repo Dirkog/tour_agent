@@ -49,7 +49,7 @@ async def search_hotels(
         return []
 
     child_ages = child_ages or []
-    results = []
+    results: list[dict] = []
 
     # Эндпойнт кэша — быстрый, возвращает актуальные данные
     url = f"{HOTELLOOK_API_BASE}/cache.json"
@@ -79,26 +79,24 @@ async def search_hotels(
                         "Hotellook API вернул статус %d для города %s",
                         response.status, location
                     )
-                    return []
+                else:
+                    data = await response.json()
 
-                data = await response.json()
+                    if not data:
+                        logger.warning("Hotellook вернул пустой результат для %s", location)
+                    else:
+                        # Парсим результаты (может быть список или словарь)
+                        hotels_list = data if isinstance(data, list) else data.get("result", [])
 
-                if not data:
-                    logger.warning("Hotellook вернул пустой результат для %s", location)
-                    return []
+                        for hotel_data in hotels_list[:limit]:
+                            hotel = _parse_hotel(hotel_data, check_in, check_out, adults)
+                            if hotel:
+                                # Фильтр по звёздам если задан
+                                if stars and hotel.get("stars") and hotel["stars"] < stars:
+                                    continue
+                                results.append(hotel)
 
-                # Парсим результаты
-                hotels_list = data if isinstance(data, list) else data.get("result", [])
-
-                for hotel_data in hotels_list[:limit]:
-                    hotel = _parse_hotel(hotel_data, check_in, check_out, adults)
-                    if hotel:
-                        # Фильтр по звёздам если задан
-                        if stars and hotel.get("stars") and hotel["stars"] < stars:
-                            continue
-                        results.append(hotel)
-
-                logger.info("Найдено %d отелей в %s", len(results), location)
+                        logger.info("Найдено %d отелей в %s", len(results), location)
 
     except aiohttp.ClientError as e:
         logger.error("Сетевая ошибка при поиске отелей: %s", e)
@@ -110,6 +108,10 @@ async def search_hotels(
         results = await _search_hotels_with_lookup(
             location, check_in, check_out, adults, children, child_ages, currency, limit
         )
+
+    # Применяем фильтр по звёздам после повторного поиска
+    if stars and results:
+        results = [h for h in results if not h.get("stars") or h["stars"] >= stars]
 
     return results
 
@@ -153,6 +155,10 @@ async def _search_hotels_with_lookup(
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(lookup_url, params=lookup_params) as response:
                 if response.status != 200:
+                    logger.warning(
+                        "Hotellook lookup вернул статус %d для %s",
+                        response.status, location
+                    )
                     return []
 
                 lookup_data = await response.json()
@@ -164,6 +170,7 @@ async def _search_hotels_with_lookup(
 
                 city_id = locations[0].get("id")
                 if not city_id:
+                    logger.warning("Lookup не вернул ID для города: %s", location)
                     return []
 
                 logger.info("Найден ID города %s: %s", location, city_id)
@@ -187,12 +194,16 @@ async def _search_hotels_with_lookup(
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(cache_url, params=cache_params) as response:
                 if response.status != 200:
+                    logger.warning(
+                        "Hotellook cache по ID вернул статус %d",
+                        response.status
+                    )
                     return []
 
                 data = await response.json()
                 hotels_list = data if isinstance(data, list) else data.get("result", [])
 
-                results = []
+                results: list[dict] = []
                 for hotel_data in hotels_list[:limit]:
                     hotel = _parse_hotel(hotel_data, check_in, check_out, adults)
                     if hotel:
@@ -227,6 +238,14 @@ def _parse_hotel(hotel_data: dict, check_in: str, check_out: str, adults: int) -
         price_avg = hotel_data.get("priceAvg") or hotel_data.get("price") or 0
         price_from = hotel_data.get("priceFrom") or hotel_data.get("minPriceTotal") or price_avg
 
+        # Убеждаемся что цена — число
+        try:
+            price_avg = float(price_avg) if price_avg else 0
+            price_from = float(price_from) if price_from else 0
+        except (TypeError, ValueError):
+            price_avg = 0
+            price_from = 0
+
         # Фото отеля
         photo = hotel_data.get("photoUrl") or hotel_data.get("photo") or ""
         if hotel_id and not photo:
@@ -236,6 +255,20 @@ def _parse_hotel(hotel_data: dict, check_in: str, check_out: str, adults: int) -
         # Адрес
         address = hotel_data.get("address", "")
 
+        # Звёзды
+        stars = hotel_data.get("stars", 0)
+        try:
+            stars = int(stars) if stars else 0
+        except (TypeError, ValueError):
+            stars = 0
+
+        # Рейтинг гостей (0-100)
+        rating = hotel_data.get("guestScore") or hotel_data.get("rating") or 0
+        try:
+            rating = float(rating) if rating else 0
+        except (TypeError, ValueError):
+            rating = 0
+
         # Ссылка на отель
         hotel_link = hotel_data.get("url") or hotel_data.get("fullUrl") or ""
         if not hotel_link and hotel_id:
@@ -244,35 +277,19 @@ def _parse_hotel(hotel_data: dict, check_in: str, check_out: str, adults: int) -
                 f"?adults={adults}&checkIn={check_in}&checkOut={check_out}"
             )
 
-        # Рейтинг
-        rating = hotel_data.get("guestScore") or hotel_data.get("rating") or 0
-
         return {
-            "id": hotel_id,
+            "id": str(hotel_id),
             "name": name,
-            "stars": int(hotel_data.get("stars", 0) or 0),
+            "stars": stars,
             "address": address,
-            "price": int(price_from) if price_from else 0,
-            "priceAvg": int(price_avg) if price_avg else 0,
+            "priceAvg": int(price_avg),
+            "priceFrom": int(price_from),
             "photo": photo,
             "link": hotel_link,
-            "rating": rating,
-            "has_wifi": hotel_data.get("has_wifi", False),
+            "rating": round(rating, 1),
             "source": "Hotellook (Travelpayouts)",
         }
 
-    except (KeyError, TypeError, ValueError) as e:
-        logger.warning("Ошибка парсинга отеля: %s", e)
+    except (TypeError, ValueError, KeyError) as e:
+        logger.warning("Ошибка парсинга отеля: %s | данные: %s", e, str(hotel_data)[:200])
         return None
-
-
-def get_hotel_photo_url(hotel_id: str | int, width: int = 640, height: int = 480) -> str:
-    """
-    Формирует URL фото отеля из Hotellook CDN.
-
-    :param hotel_id: ID отеля
-    :param width: Ширина фото
-    :param height: Высота фото
-    :return: URL фото
-    """
-    return f"https://photo.hotellook.com/image_v2/limit/{hotel_id}/{width}/{height}.jpg"

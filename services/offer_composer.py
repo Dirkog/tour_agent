@@ -23,6 +23,13 @@ from utils.formatters import (
 
 logger = logging.getLogger(__name__)
 
+# Страны Шенгенской зоны (ISO коды)
+SCHENGEN_COUNTRIES = {
+    "AT", "BE", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU",
+    "IS", "IT", "LV", "LI", "LT", "LU", "MT", "NL", "NO", "PL",
+    "PT", "SK", "SI", "ES", "SE", "CH",
+}
+
 
 async def compose_offer(tour: TourPackage, agent_id: int) -> str:
     """
@@ -35,8 +42,7 @@ async def compose_offer(tour: TourPackage, agent_id: int) -> str:
     """
     logger.info(
         "Составление предложения для агента %d, пакет #%d",
-        agent_id,
-        tour.index,
+        agent_id, tour.index,
     )
 
     params = tour.search_params
@@ -53,7 +59,7 @@ async def compose_offer(tour: TourPackage, agent_id: int) -> str:
     date_from = params.get("date_from", "")
     date_to = params.get("date_to", "")
 
-    # ── Параллельный запрос погоды и курсов валют ──────────────────
+    # ── Параллельный запрос погоды и курсов валют ────────────────────
     weather_data: dict = {"available": False, "city": destination_city}
     rates: dict = {}
 
@@ -72,20 +78,23 @@ async def compose_offer(tour: TourPackage, agent_id: int) -> str:
             rates = results[1]
         else:
             logger.warning("Ошибка получения курсов: %s", results[1])
+
     except Exception as e:
         logger.error("Ошибка при параллельном запросе данных: %s", e)
 
-    # ── Визовая информация ─────────────────────────────────────────
+    # ── Визовая информация ────────────────────────────────────────────
     if not country_code:
         country_code = get_country_code_by_name(country_name) or ""
     visa_text = get_visa_info(country_code) if country_code else ""
 
-    # ── Сборка предложения ─────────────────────────────────────────
+    # ── Сборка предложения ────────────────────────────────────────────
     offer_parts: list[str] = []
 
     # Заголовок
     nights = tour.nights or days_between(date_from, date_to)
-    offer_parts.append(_build_header(destination_city, country_name, nights, date_from, date_to))
+    offer_parts.append(
+        _build_header(destination_city, country_name, nights, date_from, date_to)
+    )
 
     # Блок рейса
     if flight:
@@ -112,7 +121,7 @@ async def compose_offer(tour: TourPackage, agent_id: int) -> str:
         offer_parts.append(visa_text)
 
     # Блок "На что обратить внимание"
-    warnings = _build_warnings(tour, params, weather_data)
+    warnings = _build_warnings(tour, params, weather_data, country_code)
     offer_parts.append(warnings)
 
     # Объединяем части
@@ -120,11 +129,16 @@ async def compose_offer(tour: TourPackage, agent_id: int) -> str:
 
     # Применяем стиль агента
     final_offer = apply_style(agent_id, base_offer)
+
     return final_offer
 
 
 def _build_header(
-    city: str, country: str, nights: int, date_from: str, date_to: str
+    city: str,
+    country: str,
+    nights: int,
+    date_from: str,
+    date_to: str,
 ) -> str:
     """Формирует заголовок предложения."""
     date_from_fmt = format_date(date_from) if date_from else "—"
@@ -132,9 +146,9 @@ def _build_header(
     now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
 
     return (
-        f"🌴 <b>Тур в {city}, {country}</b>\n"
+        f"🌴 Тур в {city}, {country} \n"
         f"📅 {date_from_fmt} — {date_to_fmt} ({nights} ночей)\n"
-        f"<i>Предложение сформировано: {now_str}</i>"
+        f" Предложение сформировано: {now_str} "
     )
 
 
@@ -168,8 +182,8 @@ def _build_flight_section(flight: dict) -> str:
     )
 
     lines = [
-        "✈️ <b>ПЕРЕЛЁТ</b>",
-        f"Авиакомпания: <b>{airline}</b>",
+        "✈️ ПЕРЕЛЁТ ",
+        f"Авиакомпания: {airline} ",
     ]
     if origin and destination:
         lines.append(f"Маршрут: {origin} → {destination}")
@@ -181,18 +195,16 @@ def _build_flight_section(flight: dict) -> str:
         lines.append(f"🛬 Обратный вылет: {ret_fmt}")
     if duration_back:
         lines.append(f"⏱ В пути (обратно): {format_duration(duration_back)}")
-
     lines.append(f"Стыковки: {transfer_text}{return_transfer_text}")
-
     if price:
         lines.append(
-            f"💰 Стоимость авиабилетов: <b>{format_price(price)}</b> "
-            f"<i>(на момент поиска)</i>"
+            f"💰 Стоимость авиабилетов: {format_price(price)} "
+            f" (на момент поиска) "
         )
     if link:
         lines.append(f'🔗 <a href="{link}">Посмотреть на Aviasales</a>')
+    lines.append(f" Источник: {source} ")
 
-    lines.append(f"<i>Источник: {source}</i>")
     return "\n".join(lines)
 
 
@@ -207,8 +219,8 @@ def _build_hotel_section(hotel: dict) -> str:
     source = hotel.get("source", "Hotellook")
 
     lines = [
-        "🏨 <b>ОТЕЛЬ</b>",
-        f"Название: <b>{name}</b> {stars_to_emoji(stars)}",
+        "🏨 ОТЕЛЬ ",
+        f"Название: {name} {stars_to_emoji(stars)}",
     ]
     if address:
         lines.append(f"📍 Адрес: {address}")
@@ -217,13 +229,13 @@ def _build_hotel_section(hotel: dict) -> str:
         lines.append(f"⭐ Рейтинг гостей: {r_str}")
     if price:
         lines.append(
-            f"💰 Стоимость проживания: <b>{format_price(price)}</b> "
-            f"<i>(на момент поиска)</i>"
+            f"💰 Стоимость проживания: {format_price(price)} "
+            f" (на момент поиска) "
         )
     if link:
         lines.append(f'🔗 <a href="{link}">Посмотреть на Hotellook</a>')
+    lines.append(f" Источник: {source} ")
 
-    lines.append(f"<i>Источник: {source}</i>")
     return "\n".join(lines)
 
 
@@ -237,13 +249,12 @@ def _build_price_section(package: TourPackage, params: dict) -> str:
     total_persons = adults + children
     price_per_person = total // total_persons if total_persons else total
 
-    lines = ["💵 <b>СТОИМОСТЬ ТУРА</b>"]
+    lines = ["💵 СТОИМОСТЬ ТУРА "]
 
     if children:
         lines.append(f"👥 Состав: {adults} взросл. + {children} дет.")
     else:
         lines.append(f"👥 Взрослых: {adults}")
-
     lines.append(f"🌙 Ночей: {nights}")
 
     if package.flight and package.hotel:
@@ -255,20 +266,24 @@ def _build_price_section(package: TourPackage, params: dict) -> str:
             lines.append(f"🏨 Проживание: {format_price(hotel_price)}")
 
     if total:
-        lines.append(f"💎 <b>ИТОГО: {format_price(total)}</b>")
+        lines.append(f"💎 ИТОГО: {format_price(total)} ")
         if total_persons > 1:
             lines.append(f"👤 На человека: {format_price(price_per_person)}")
         if price_per_night:
             lines.append(f"📅 За ночь: {format_price(price_per_night)}")
 
     lines.append(
-        "<i>⚠️ Все суммы указаны на момент поиска и могут измениться при бронировании.</i>"
+        " ⚠️ Все суммы указаны на момент поиска и могут измениться при бронировании. "
     )
+
     return "\n".join(lines)
 
 
 def _build_warnings(
-    package: TourPackage, params: dict, weather: dict
+    package: TourPackage,
+    params: dict,
+    weather: dict,
+    country_code: str = "",
 ) -> str:
     """
     Анализирует тур и формирует блок предупреждений для агента.
@@ -276,13 +291,14 @@ def _build_warnings(
     :param package: Данные тура
     :param params: Параметры поиска
     :param weather: Данные о погоде
+    :param country_code: ISO код страны назначения
     :return: Текст блока предупреждений
     """
     warnings: list[str] = []
     flight = package.flight or {}
     hotel = package.hotel or {}
 
-    # ── Стыковки ───────────────────────────────────────────────────
+    # ── Стыковки ──────────────────────────────────────────────────────
     transfers = flight.get("transfers", 0)
     return_transfers = flight.get("return_transfers", 0)
 
@@ -293,73 +309,115 @@ def _build_warnings(
         )
     if return_transfers > 0:
         warnings.append(
-            f"🔄 Обратный рейс имеет {return_transfers} стыковку(-и)."
+            f"🔄 Обратный рейс имеет {return_transfers} стыковку(-и). "
+            "Уточните время ожидания на обратном пути."
         )
 
-    # ── Дети ───────────────────────────────────────────────────────
+    # ── Дети ──────────────────────────────────────────────────────────
     children = params.get("children") or 0
     child_ages = params.get("child_ages") or []
 
     if children > 0:
-        if any(age < 2 for age in child_ages):
+        if child_ages and any(age < 2 for age in child_ages):
             warnings.append(
-                "👶 В группе ребёнок до 2 лет. Уточните в авиакомпании "
-                "условия перевозки и стоимость для младенца."
+                "👶 В группе есть дети до 2 лет (младенцы). "
+                "Уточните условия перевозки у авиакомпании и наличие детской кроватки в отеле."
             )
-        if any(12 <= age < 16 for age in child_ages):
+        if child_ages and any(2 <= age < 12 for age in child_ages):
             warnings.append(
-                "🧒 В группе подросток 12–15 лет. Некоторые отели "
-                "относят их к категории «взрослые». Уточните условия."
+                "👧 В группе есть дети от 2 до 12 лет. "
+                "Уточните наличие детского меню, бассейна и анимации в отеле."
+            )
+        if child_ages and any(age >= 12 for age in child_ages):
+            warnings.append(
+                "🧑 Дети старше 12 лет могут оплачиваться как взрослые. "
+                "Уточните условия у авиакомпании и отеля."
             )
 
-    # ── Погода ─────────────────────────────────────────────────────
-    rain_days = weather.get("precipitation_days", 0)
-    if rain_days and rain_days > 3:
-        warnings.append(
-            f"🌧 На период поездки прогнозируется {rain_days} дождливых периодов. "
-            "Рекомендуем учесть при планировании экскурсий."
-        )
+    # ── Погода ────────────────────────────────────────────────────────
+    if weather.get("available"):
+        rain_days = weather.get("precipitation_days", 0)
+        if rain_days > 3:
+            warnings.append(
+                f"🌧 На период поездки прогнозируется {rain_days} дождливых периодов. "
+                "Рекомендуем учесть при планировании активностей."
+            )
+        temp_avg = weather.get("temp_avg")
+        if temp_avg is not None and temp_avg > 40:
+            warnings.append(
+                f"☀️ Ожидается высокая температура (+{temp_avg}°C). "
+                "Рекомендуем уточнить наличие кондиционера в номере."
+            )
+        if temp_avg is not None and temp_avg < 15:
+            warnings.append(
+                f"❄️ Температура может быть прохладной (+{temp_avg}°C). "
+                "Рекомендуем взять тёплую одежду."
+            )
 
-    # ── Особенности отеля ──────────────────────────────────────────
+    # ── Особенности отеля ─────────────────────────────────────────────
     if hotel:
         hotel_stars = hotel.get("stars", 0)
         if hotel_stars and hotel_stars < 3:
             warnings.append(
-                "🏨 Выбранный отель — эконом-класс (менее 3 звёзд). "
-                "Уточните наличие кондиционера, бассейна и интернета."
+                f"⭐ Отель категории {hotel_stars}★. "
+                "Уточните у клиента приемлемый уровень комфорта."
+            )
+        hotel_rating = hotel.get("rating", 0)
+        if hotel_rating and hotel_rating < 60:
+            rating_str = f"{hotel_rating}/100" if hotel_rating > 10 else f"{hotel_rating}/10"
+            warnings.append(
+                f"📊 Рейтинг отеля невысокий: {rating_str}. "
+                "Рекомендуем ознакомиться с отзывами гостей перед бронированием."
             )
 
-    # ── Визовые требования ─────────────────────────────────────────
-    country_code = params.get("country_code", "").upper()
+    # ── Визовые нюансы ────────────────────────────────────────────────
+    if country_code:
+        if country_code in SCHENGEN_COUNTRIES:
+            warnings.append(
+                "🇪🇺 Требуется шенгенская виза! "
+                "Рекомендуем начать оформление не позднее чем за 3–4 недели до вылета."
+            )
+        elif country_code == "LK":
+            warnings.append(
+                "💻 Требуется электронная виза для Шри-Ланки (ETA). "
+                "Оформляется онлайн на eta.gov.lk. Срок обработки — 2–4 рабочих дня."
+            )
+        elif country_code == "IN":
+            warnings.append(
+                "💻 Требуется электронная виза для Индии (e-Tourist Visa). "
+                "Оформляется на indianvisaonline.gov.in. Срок — до 4 рабочих дней."
+            )
+        elif country_code == "EG":
+            warnings.append(
+                "🏛 В Египет — виза по прилёту (~$25). "
+                "Оформляется в аэропорту, имейте наличные USD."
+            )
+        elif country_code == "CU":
+            warnings.append(
+                "🗺 На Кубу требуется туристическая карта (~$25). "
+                "Можно оформить заранее через авиакомпанию или в аэропорту."
+            )
+        elif country_code == "TZ":
+            warnings.append(
+                "🗺 В Танзанию (Занзибар) — виза по прилёту $50 или e-visa. "
+                "При въезде на Занзибар — дополнительный паспортный контроль."
+            )
 
-    if country_code in ("GR", "ES", "IT", "FR", "DE", "CZ", "AT", "NL", "PL", "HU"):
+    # ── Срок действия паспорта ────────────────────────────────────────
+    date_to_str = params.get("date_to", "")
+    if date_to_str:
         warnings.append(
-            "🛂 Требуется <b>шенгенская виза</b>! "
-            "Рекомендуем начать оформление не позднее чем за 3–4 недели до вылета."
-        )
-    elif country_code in ("LK",):
-        warnings.append(
-            "💻 Требуется <b>электронная виза</b> для Шри-Ланки (ETA). "
-            "Оформляется онлайн на eta.gov.lk. Срок обработки — 2–4 рабочих дня."
-        )
-    elif country_code in ("IN",):
-        warnings.append(
-            "💻 Требуется <b>электронная виза</b> для Индии (e-Tourist Visa). "
-            "Оформляется на indianvisaonline.gov.in. Срок — до 4 рабочих дней."
-        )
-    elif country_code in ("EG",):
-        warnings.append(
-            "🏛 В Египет — <b>виза по прилёту</b> (~$25). "
-            "Оформляется в аэропорту, имейте наличные USD."
+            "📋 Проверьте срок действия загранпаспорта клиента. "
+            "Большинство стран требуют действия паспорта минимум 6 месяцев после даты возвращения."
         )
 
-    # ── Итог ───────────────────────────────────────────────────────
+    # ── Итог ──────────────────────────────────────────────────────────
     if warnings:
-        header = "⚠️ <b>НА ЧТО ОБРАТИТЬ ВНИМАНИЕ:</b>"
+        header = "⚠️ НА ЧТО ОБРАТИТЬ ВНИМАНИЕ: "
         body = "\n\n".join(f"• {w}" for w in warnings)
         return f"{header}\n\n{body}"
     else:
-        return "✅ <b>На что обратить внимание:</b> Явных рисков не обнаружено."
+        return "✅ На что обратить внимание: Явных рисков не обнаружено."
 
 
 def _fmt_datetime(dt_str: str) -> str:
