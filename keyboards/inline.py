@@ -20,6 +20,19 @@ def kb_org_type() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_main_menu() -> InlineKeyboardMarkup:
+    """Главное меню бота."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🔍 Найти тур", callback_data="new_search"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📖 Помощь", callback_data="help"),
+        InlineKeyboardButton(text="🎨 Мой стиль", callback_data="my_style"),
+    )
+    return builder.as_markup()
+
+
 # =====================================================
 # ПОИСК ТУРА — СТРАНА НАЗНАЧЕНИЯ
 # =====================================================
@@ -30,7 +43,7 @@ def kb_popular_countries() -> InlineKeyboardMarkup:
     countries = [
         ("🇹🇷 Турция", "country_Turkey_TR"),
         ("🇪🇬 Египет", "country_Egypt_EG"),
-        ("🇺🇦 ОАЭ", "country_UAE_AE"),
+        ("🇦🇪 ОАЭ", "country_UAE_AE"),
         ("🇹🇭 Таиланд", "country_Thailand_TH"),
         ("🇬🇷 Греция", "country_Greece_GR"),
         ("🇮🇩 Бали", "country_Indonesia_ID"),
@@ -38,6 +51,8 @@ def kb_popular_countries() -> InlineKeyboardMarkup:
         ("🇰🇿 Казахстан", "country_Kazakhstan_KZ"),
         ("🇦🇲 Армения", "country_Armenia_AM"),
         ("🇬🇪 Грузия", "country_Georgia_GE"),
+        ("🇮🇳 Индия (Гоа)", "country_India_IN"),
+        ("🇨🇾 Кипр", "country_Cyprus_CY"),
     ]
     for name, data in countries:
         builder.button(text=name, callback_data=data)
@@ -61,14 +76,26 @@ def kb_date_shortcuts() -> InlineKeyboardMarkup:
 
     # Предлагаем несколько популярных диапазонов
     options = [
-        ("📅 Через 2 недели, 7 ночей",
-         f"dates_{(today + timedelta(14)).isoformat()}_{(today + timedelta(21)).isoformat()}"),
-        ("📅 Через 1 месяц, 7 ночей",
-         f"dates_{(today + timedelta(30)).isoformat()}_{(today + timedelta(37)).isoformat()}"),
-        ("📅 Через 1 месяц, 14 ночей",
-         f"dates_{(today + timedelta(30)).isoformat()}_{(today + timedelta(44)).isoformat()}"),
-        ("📅 Через 2 месяца, 7 ночей",
-         f"dates_{(today + timedelta(60)).isoformat()}_{(today + timedelta(67)).isoformat()}"),
+        (
+            "📅 Через 2 недели, 7 ночей",
+            f"dates_{(today + timedelta(14)).isoformat()}_{(today + timedelta(21)).isoformat()}"
+        ),
+        (
+            "📅 Через 1 месяц, 7 ночей",
+            f"dates_{(today + timedelta(30)).isoformat()}_{(today + timedelta(37)).isoformat()}"
+        ),
+        (
+            "📅 Через 1 месяц, 14 ночей",
+            f"dates_{(today + timedelta(30)).isoformat()}_{(today + timedelta(44)).isoformat()}"
+        ),
+        (
+            "📅 Через 2 месяца, 7 ночей",
+            f"dates_{(today + timedelta(60)).isoformat()}_{(today + timedelta(67)).isoformat()}"
+        ),
+        (
+            "📅 Через 2 месяца, 14 ночей",
+            f"dates_{(today + timedelta(60)).isoformat()}_{(today + timedelta(74)).isoformat()}"
+        ),
     ]
 
     for name, data in options:
@@ -141,7 +168,7 @@ def kb_stars() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5★", callback_data="stars_5"),
     )
     builder.row(
-        InlineKeyboardButton(text="Любые", callback_data="stars_0"),
+        InlineKeyboardButton(text="Любые звёзды", callback_data="stars_0"),
     )
     return builder.as_markup()
 
@@ -150,11 +177,11 @@ def kb_meal_type() -> InlineKeyboardMarkup:
     """Кнопки выбора типа питания."""
     builder = InlineKeyboardBuilder()
     meals = [
-        ("🍽 Всё включено", "meal_ai"),
-        ("🍳 Завтрак", "meal_bb"),
-        ("🍽 Полупансион", "meal_hb"),
-        ("🏠 Без питания", "meal_ro"),
-        ("Любое", "meal_any"),
+        ("🍽 Всё включено (AI)", "meal_ai"),
+        ("🍳 Завтрак (BB)", "meal_bb"),
+        ("🍽 Полупансион (HB)", "meal_hb"),
+        ("🏠 Без питания (RO)", "meal_ro"),
+        ("Любое питание", "meal_any"),
     ]
     for name, data in meals:
         builder.button(text=name, callback_data=data)
@@ -167,13 +194,39 @@ def kb_beach_distance() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     options = [
         ("🏖 1-я линия", "beach_first"),
-        ("🌊 До 300м", "beach_300"),
-        ("🏃 До 500м", "beach_500"),
-        ("🚌 Любое", "beach_any"),
+        ("🌊 До 300 м", "beach_300"),
+        ("🏃 До 500 м", "beach_500"),
+        ("🚌 Любое расстояние", "beach_any"),
     ]
     for name, data in options:
         builder.button(text=name, callback_data=data)
     builder.adjust(2)
+    return builder.as_markup()
+
+
+# =====================================================
+# ГОРОД ВЫЛЕТА
+# =====================================================
+
+def kb_departure_cities() -> InlineKeyboardMarkup:
+    """Кнопки выбора города вылета."""
+    builder = InlineKeyboardBuilder()
+    cities = [
+        ("✈️ Москва", "depart_MOW"),
+        ("✈️ Санкт-Петербург", "depart_LED"),
+        ("✈️ Екатеринбург", "depart_SVX"),
+        ("✈️ Казань", "depart_KZN"),
+        ("✈️ Ростов-на-Дону", "depart_ROV"),
+        ("✈️ Новосибирск", "depart_OVB"),
+        ("✈️ Уфа", "depart_UFA"),
+        ("✈️ Краснодар", "depart_KRR"),
+    ]
+    for name, data in cities:
+        builder.button(text=name, callback_data=data)
+    builder.adjust(2)
+    builder.row(
+        InlineKeyboardButton(text="✏️ Другой город", callback_data="depart_manual")
+    )
     return builder.as_markup()
 
 
@@ -215,11 +268,11 @@ def kb_tour_result(tour_index: int, has_link: bool = False) -> InlineKeyboardMar
     if has_link:
         builder.row(
             InlineKeyboardButton(
-                text="🔗 Смотреть на Aviasales",
+                text="✈️ Aviasales",
                 callback_data=f"open_flight_{tour_index}"
             ),
             InlineKeyboardButton(
-                text="🏨 Смотреть отель",
+                text="🏨 Hotellook",
                 callback_data=f"open_hotel_{tour_index}"
             ),
         )
@@ -234,82 +287,48 @@ def kb_new_search() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔍 Новый поиск", callback_data="new_search"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"),
     )
     return builder.as_markup()
 
 
 # =====================================================
-# ГОТОВОЕ ПРЕДЛОЖЕНИЕ
+# РАБОТА С ПРЕДЛОЖЕНИЕМ
 # =====================================================
 
-def kb_offer_actions() -> InlineKeyboardMarkup:
-    """Кнопки действий с готовым коммерческим предложением."""
+def kb_offer_actions(tour_index: int) -> InlineKeyboardMarkup:
+    """
+    Кнопки для работы с готовым коммерческим предложением.
+
+    :param tour_index: Индекс тура для идентификации предложения
+    """
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ Отправить клиенту", callback_data="offer_send"),
-        InlineKeyboardButton(text="✏️ Редактировать", callback_data="offer_edit"),
+        InlineKeyboardButton(
+            text="✅ Отправить клиенту",
+            callback_data=f"offer_send_{tour_index}"
+        )
     )
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️ Редактировать",
+            callback_data=f"offer_edit_{tour_index}"
+        ),
+        InlineKeyboardButton(
+            text="🔍 Новый поиск",
+            callback_data="new_search"
+        ),
+    )
+    return builder.as_markup()
+
+
+def kb_after_offer() -> InlineKeyboardMarkup:
+    """Клавиатура после работы с предложением."""
+    builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔍 Новый поиск", callback_data="new_search"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="offer_cancel"),
-    )
-    return builder.as_markup()
-
-
-def kb_after_edit() -> InlineKeyboardMarkup:
-    """Кнопки после редактирования предложения."""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="✅ Использовать этот вариант", callback_data="offer_send_edited"),
     )
     builder.row(
-        InlineKeyboardButton(text="🔍 Новый поиск", callback_data="new_search"),
-    )
-    return builder.as_markup()
-
-
-# =====================================================
-# НАВИГАЦИЯ
-# =====================================================
-
-def kb_main_menu() -> InlineKeyboardMarkup:
-    """Главное меню бота."""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="🔍 Найти тур", callback_data="new_search"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="ℹ️ Справка", callback_data="help"),
-    )
-    return builder.as_markup()
-
-
-def kb_skip() -> InlineKeyboardMarkup:
-    """Кнопка пропуска необязательного параметра."""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="⏩ Пропустить", callback_data="skip"),
-    )
-    return builder.as_markup()
-
-
-def kb_departure_cities() -> InlineKeyboardMarkup:
-    """Кнопки с популярными городами вылета."""
-    builder = InlineKeyboardBuilder()
-    cities = [
-        ("🏙 Москва (MOW)", "dep_MOW"),
-        ("🌆 Санкт-Петербург (LED)", "dep_LED"),
-        ("🌇 Екатеринбург (SVX)", "dep_SVX"),
-        ("🌃 Краснодар (KRR)", "dep_KRR"),
-        ("🌉 Новосибирск (OVB)", "dep_OVB"),
-        ("🌁 Казань (KZN)", "dep_KZN"),
-        ("🌆 Уфа (UFA)", "dep_UFA"),
-        ("🌇 Ростов-на-Дону (ROV)", "dep_ROV"),
-    ]
-    for name, data in cities:
-        builder.button(text=name, callback_data=data)
-    builder.adjust(2)
-    builder.row(
-        InlineKeyboardButton(text="✏️ Другой город", callback_data="dep_manual")
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"),
     )
     return builder.as_markup()
