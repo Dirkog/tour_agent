@@ -1,1 +1,1 @@
-# Пакет middleware-обработчиков
+# Пакет middleware
