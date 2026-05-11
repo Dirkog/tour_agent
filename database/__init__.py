@@ -1,1 +1,1 @@
-# Пакет database — работа с SQLite через aiosqlite
+# Пакет для работы с базой данных (aiosqlite / SQLite)

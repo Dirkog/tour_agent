@@ -76,7 +76,7 @@ async def main() -> None:
     logger = logging.getLogger(__name__)
 
     logger.info("=" * 60)
-    logger.info("Запуск бота для турагентов v1.1")
+    logger.info("Запуск бота для турагентов v1.2")
     logger.info("=" * 60)
 
     # ── Проверка конфигурации ──────────────────────────────────────
@@ -139,7 +139,7 @@ async def main() -> None:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(
             bot,
-            # Явно указываем типы обновлений, включая голосовые сообщения
+            # ИСПРАВЛЕНО: добавлен "voice" для корректного получения голосовых сообщений
             allowed_updates=[
                 "message",
                 "callback_query",

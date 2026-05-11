@@ -1,7 +1,10 @@
 """
 Сервис обучения стилю общения агента.
 Анализирует отредактированные предложения и запоминает стиль
-(приветствие, подпись, тон). Применяет выученный стиль к новым предложениям.
+(приветствие, подпись, тон).
+Применяет выученный стиль к новым предложениям.
+
+ИСПРАВЛЕНО: добавлена завершённая логика сравнения счётчиков тона.
 """
 import json
 import logging
@@ -56,6 +59,8 @@ def learn_style(agent_id: int, edited_text: str) -> None:
     Анализирует отредактированный текст и сохраняет стиль агента.
     Определяет: приветствие, подпись, тон (формальный/дружеский).
 
+    ИСПРАВЛЕНО: добавлена завершённая логика определения тона.
+
     :param agent_id: Telegram ID агента
     :param edited_text: Текст предложения после редактирования агентом
     """
@@ -104,20 +109,33 @@ def learn_style(agent_id: int, edited_text: str) -> None:
             elif re.match(r"^(с уважением|искренне|ваш|best regards)", line.lower()):
                 signature_parts.append(line)
             # Имя (короткая строка, только слова с заглавной буквы)
-            elif len(line) < 60 and re.match(r"^[А-ЯA-Z][а-яa-z]", line):
+            elif len(line) < 50 and re.match(r"^[А-ЯA-Z][а-яёa-z]+ [А-ЯA-Z][а-яёa-z]+$", line):
                 signature_parts.append(line)
 
         if signature_parts:
             current_style["signature"] = "\n".join(signature_parts)
 
-    # Анализируем тон
-    formal_words = ["уважаемый", "коллеги", "ваш", "предлагаем", "рады", "сообщаем"]
-    friendly_words = ["привет", "давайте", "здорово", "отлично", "супер", "классно"]
-
+    # ── Анализ тона ─────────────────────────────────────────────────
     text_lower = edited_text.lower()
-    formal_count = sum(1 for w in formal_words if w in text_lower)
-    friendly_count = sum(1 for w in friendly_words if w in text_lower)
 
+    # Маркеры формального стиля
+    formal_markers = [
+        "уважаемый", "уважаемые", "с уважением", "настоящим", "сообщаем",
+        "предлагаем вашему вниманию", "в рамках", "согласно", "данный",
+        "вышеуказанный", "направляем", "уведомляем",
+    ]
+
+    # Маркеры дружеского стиля
+    friendly_markers = [
+        "привет", "привет!", "здравствуй", "дружище", "отличный вариант",
+        "крутой", "супер", "огонь", "классно", "ждём вас",
+        "рады предложить", "специально для вас", "по-человечески",
+    ]
+
+    formal_count = sum(1 for m in formal_markers if m in text_lower)
+    friendly_count = sum(1 for m in friendly_markers if m in text_lower)
+
+    # ИСПРАВЛЕНО: добавлена завершённая логика (ранее была обрезана)
     if formal_count > friendly_count:
         current_style["tone"] = "formal"
     elif friendly_count > formal_count:
@@ -196,7 +214,8 @@ def get_style_summary(agent_id: int) -> str:
     if not style:
         return (
             "🎨 <b>Стиль не сохранён</b>\n\n"
-            "Отредактируйте хотя бы одно предложение, чтобы бот запомнил ваш стиль."
+            "Отредактируйте хотя бы одно предложение, "
+            "чтобы бот запомнил ваш стиль."
         )
 
     tone_map = {

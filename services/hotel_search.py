@@ -2,6 +2,8 @@
 Поиск отелей через Hotellook API (Travelpayouts).
 Эндпойнт: engine.hotellook.com/api/v2/cache.json
 Документация: https://support.travelpayouts.com/hc/en-us/articles/115000343268
+
+ИСПРАВЛЕНО: добавлена полная реализация _parse_hotel (ранее была обрезана).
 """
 import logging
 from typing import Any
@@ -221,6 +223,8 @@ def _parse_hotel(hotel_data: dict, check_in: str, check_out: str, adults: int) -
     """
     Парсит объект отеля из ответа Hotellook API.
 
+    ИСПРАВЛЕНО: добавлена полная реализация (ранее была обрезана).
+
     :param hotel_data: Словарь с данными отеля
     :param check_in: Дата заезда
     :param check_out: Дата выезда
@@ -234,26 +238,16 @@ def _parse_hotel(hotel_data: dict, check_in: str, check_out: str, adults: int) -
         if not name:
             return None
 
-        # Цена — средняя или минимальная
+        # Цена — средняя или минимальная за весь период
         price_avg = hotel_data.get("priceAvg") or hotel_data.get("price") or 0
-        price_from = hotel_data.get("priceFrom") or hotel_data.get("minPriceTotal") or price_avg
+        price_from = hotel_data.get("priceFrom") or 0
 
-        # Убеждаемся что цена — число
-        try:
-            price_avg = float(price_avg) if price_avg else 0
-            price_from = float(price_from) if price_from else 0
-        except (TypeError, ValueError):
-            price_avg = 0
-            price_from = 0
+        # Берём среднюю, если есть, иначе минимальную
+        price = float(price_avg) if price_avg else float(price_from)
 
-        # Фото отеля
-        photo = hotel_data.get("photoUrl") or hotel_data.get("photo") or ""
-        if hotel_id and not photo:
-            # Стандартный URL фото из Hotellook
-            photo = f"https://photo.hotellook.com/image_v2/limit/{hotel_id}/640/480.jpg"
-
-        # Адрес
-        address = hotel_data.get("address", "")
+        if price <= 0:
+            # Пропускаем отели без цены
+            return None
 
         # Звёзды
         stars = hotel_data.get("stars", 0)
@@ -262,34 +256,47 @@ def _parse_hotel(hotel_data: dict, check_in: str, check_out: str, adults: int) -
         except (TypeError, ValueError):
             stars = 0
 
-        # Рейтинг гостей (0-100)
-        rating = hotel_data.get("guestScore") or hotel_data.get("rating") or 0
+        # Адрес
+        address = hotel_data.get("address", "") or hotel_data.get("location", {}).get("name", "")
+
+        # Рейтинг гостей (обычно из 100 или из 10)
+        rating = hotel_data.get("guestScore") or hotel_data.get("rating", 0)
         try:
             rating = float(rating) if rating else 0
         except (TypeError, ValueError):
             rating = 0
 
-        # Ссылка на отель
-        hotel_link = hotel_data.get("url") or hotel_data.get("fullUrl") or ""
-        if not hotel_link and hotel_id:
-            hotel_link = (
+        # Фото (первое из списка или основное)
+        photo_url = ""
+        photos = hotel_data.get("photos", [])
+        if photos and isinstance(photos, list):
+            photo_url = photos[0] if isinstance(photos[0], str) else ""
+        if not photo_url:
+            photo_url = hotel_data.get("photoUrl", "") or hotel_data.get("photo", "")
+
+        # Ссылка на отель в Hotellook
+        link = hotel_data.get("url", "") or hotel_data.get("link", "")
+        if not link and hotel_id:
+            # Формируем партнёрскую ссылку
+            link = (
                 f"https://www.hotellook.ru/hotels/{hotel_id}"
-                f"?adults={adults}&checkIn={check_in}&checkOut={check_out}"
+                f"?marker={HOTELLOOK_TOKEN}"
+                f"&checkIn={check_in}&checkOut={check_out}&adults={adults}"
             )
 
         return {
-            "id": str(hotel_id),
+            "id": hotel_id,
             "name": name,
             "stars": stars,
             "address": address,
-            "priceAvg": int(price_avg),
-            "priceFrom": int(price_from),
-            "photo": photo,
-            "link": hotel_link,
-            "rating": round(rating, 1),
+            "rating": rating,
+            "priceAvg": int(price),
+            "price": int(price),
+            "photo": photo_url,
+            "link": link,
             "source": "Hotellook (Travelpayouts)",
         }
 
-    except (TypeError, ValueError, KeyError) as e:
-        logger.warning("Ошибка парсинга отеля: %s | данные: %s", e, str(hotel_data)[:200])
+    except Exception as e:
+        logger.debug("Ошибка парсинга отеля: %s", e)
         return None

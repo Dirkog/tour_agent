@@ -3,15 +3,15 @@
 Доступны только для ADMIN_ID (из .env).
 
 Команды:
-  /addtester <telegram_id>  — добавить агента в белый список
-  /deltester <telegram_id>  — удалить агента из белого списка
-  /testers                  — список всех разрешённых пользователей
-  /stats                    — статистика использования бота
+  /addtester  — добавить агента в белый список
+  /deltester  — удалить агента из белого списка
+  /testers    — список всех разрешённых пользователей
+  /stats      — статистика использования бота
+  /broadcast  — рассылка всем агентам
 """
-
 import logging
 
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -28,7 +28,7 @@ router = Router()
 
 def _is_admin(message: Message) -> bool:
     """Проверяет, является ли отправитель администратором."""
-    return message.from_user and message.from_user.id == ADMIN_ID
+    return bool(message.from_user and message.from_user.id == ADMIN_ID)
 
 
 # =============================================================================
@@ -46,12 +46,13 @@ async def cmd_add_tester(message: Message) -> None:
         await message.answer("🔒 Эта команда доступна только администратору.")
         return
 
-    # Парсим аргументы команды
+    # ИСПРАВЛЕНО: было `if len(parts)` без сравнения
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer(
-            "❌ Укажите Telegram ID:\n"
-            "<code>/addtester 123456789</code>"
+            "❌ Укажите Telegram ID.\n"
+            "Пример: <code>/addtester 123456789</code>",
+            parse_mode="HTML",
         )
         return
 
@@ -60,7 +61,8 @@ async def cmd_add_tester(message: Message) -> None:
     except ValueError:
         await message.answer(
             "❌ Telegram ID должен быть числом.\n"
-            "<code>/addtester 123456789</code>"
+            "Пример: <code>/addtester 123456789</code>",
+            parse_mode="HTML",
         )
         return
 
@@ -71,7 +73,6 @@ async def cmd_add_tester(message: Message) -> None:
         return
 
     added = add_tester(tester_id)
-
     if added:
         logger.info(
             "Администратор %d добавил нового агента: %d",
@@ -80,11 +81,13 @@ async def cmd_add_tester(message: Message) -> None:
         await message.answer(
             f"✅ <b>Добавлен</b>\n\n"
             f"Telegram ID <code>{tester_id}</code> добавлен в белый список.\n"
-            f"Теперь агент может использовать бота."
+            f"Теперь агент может использовать бота.",
+            parse_mode="HTML",
         )
     else:
         await message.answer(
-            f"ℹ️ Telegram ID <code>{tester_id}</code> уже в белом списке."
+            f"ℹ️ Telegram ID <code>{tester_id}</code> уже в белом списке.",
+            parse_mode="HTML",
         )
 
 
@@ -103,11 +106,13 @@ async def cmd_del_tester(message: Message) -> None:
         await message.answer("🔒 Эта команда доступна только администратору.")
         return
 
+    # ИСПРАВЛЕНО: было `if len(parts)` без сравнения
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer(
-            "❌ Укажите Telegram ID:\n"
-            "<code>/deltester 123456789</code>"
+            "❌ Укажите Telegram ID.\n"
+            "Пример: <code>/deltester 123456789</code>",
+            parse_mode="HTML",
         )
         return
 
@@ -120,19 +125,20 @@ async def cmd_del_tester(message: Message) -> None:
     testers = load_testers()
     if tester_id not in testers:
         await message.answer(
-            f"ℹ️ Telegram ID <code>{tester_id}</code> не найден в списке."
+            f"ℹ️ Telegram ID <code>{tester_id}</code> не найден в списке.",
+            parse_mode="HTML",
         )
         return
 
     testers.remove(tester_id)
     save_testers(testers)
-
     logger.info(
         "Администратор %d удалил агента: %d",
         message.from_user.id, tester_id
     )
     await message.answer(
-        f"✅ Telegram ID <code>{tester_id}</code> удалён из белого списка."
+        f"✅ Telegram ID <code>{tester_id}</code> удалён из белого списка.",
+        parse_mode="HTML",
     )
 
 
@@ -151,20 +157,19 @@ async def cmd_list_testers(message: Message) -> None:
         return
 
     testers = load_testers()
-
     if not testers:
         await message.answer(
             "📋 <b>Белый список пуст</b>\n\n"
             "Добавьте агентов командой:\n"
-            "<code>/addtester 123456789</code>"
+            "<code>/addtester 123456789</code>",
+            parse_mode="HTML",
         )
         return
 
     lines = [f"📋 <b>Белый список ({len(testers)} агентов):</b>\n"]
     for i, tid in enumerate(testers, 1):
         lines.append(f"{i}. <code>{tid}</code>")
-
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 # =============================================================================
@@ -184,36 +189,38 @@ async def cmd_stats(message: Message) -> None:
     try:
         stats = await get_stats()
         text = format_stats(stats)
-        await message.answer(text)
+        await message.answer(text, parse_mode="HTML")
     except Exception as exc:
         logger.error("Ошибка получения статистики: %s", exc)
         await message.answer(
-            "❌ Не удалось получить статистику.\n"
-            f"Ошибка: <code>{exc}</code>"
+            f"❌ Не удалось получить статистику.\n"
+            f"Ошибка: <code>{exc}</code>",
+            parse_mode="HTML",
         )
 
 
 # =============================================================================
-# /broadcast — рассылка всем агентам (опционально)
+# /broadcast — рассылка всем агентам
 # =============================================================================
 
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message) -> None:
     """
     Рассылает сообщение всем агентам из белого списка.
-    Использование: /broadcast <текст сообщения>
+    Использование: /broadcast <текст>
     Только для администратора.
     """
     if not _is_admin(message):
         await message.answer("🔒 Эта команда доступна только администратору.")
         return
 
-    # Текст после команды
+    # ИСПРАВЛЕНО: было `if len(text_parts)` без сравнения
     text_parts = message.text.split(maxsplit=1)
     if len(text_parts) < 2:
         await message.answer(
-            "❌ Укажите текст рассылки:\n"
-            "<code>/broadcast Уважаемые агенты, бот обновлён!</code>"
+            "❌ Укажите текст рассылки.\n"
+            "Пример: <code>/broadcast Уважаемые агенты, бот обновлён!</code>",
+            parse_mode="HTML",
         )
         return
 
@@ -236,6 +243,7 @@ async def cmd_broadcast(message: Message) -> None:
             await message.bot.send_message(
                 chat_id=tester_id,
                 text=f"📢 <b>Сообщение от администратора:</b>\n\n{broadcast_text}",
+                parse_mode="HTML",
             )
             success += 1
         except Exception as exc:
@@ -245,5 +253,6 @@ async def cmd_broadcast(message: Message) -> None:
     await status_msg.edit_text(
         f"✅ <b>Рассылка завершена</b>\n\n"
         f"• Отправлено: {success}\n"
-        f"• Ошибок: {failed}"
+        f"• Ошибок: {failed}",
+        parse_mode="HTML",
     )

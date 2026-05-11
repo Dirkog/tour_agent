@@ -32,7 +32,7 @@ OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
 # Telegram ID администратора (числовой)
 ADMIN_ID: int = int(os.getenv("ADMIN_ID", "0"))
 
-# Hotellook токен (обычно совпадает с Aviasales токеном)
+# Hotellook токен (обычно совпадает с Aviasales токеном в Travelpayouts)
 HOTELLOOK_TOKEN: str = os.getenv("HOTELLOOK_TOKEN", os.getenv("AVIASALES_TOKEN", ""))
 
 
@@ -69,7 +69,7 @@ VISA_RULES_FILE = DATA_DIR / "visa_rules.json"
 # Базовый URL для всех NIM API (совместим с OpenAI SDK)
 NVIDIA_NIM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
 
-# Модель для извлечения параметров (NLP)
+# Модель для извлечения параметров (NLP) — актуальная на 2026 год
 NVIDIA_LLM_MODEL: str = "meta/llama-3.1-8b-instruct"
 
 # Модель для распознавания голоса
@@ -97,6 +97,7 @@ OPENWEATHER_API_BASE: str = "https://api.openweathermap.org/data/2.5"
 # ЦБ РФ API
 # =====================================================
 
+# Зеркало ЦБ РФ в формате JSON (быстрее официального XML)
 CBR_API_URL: str = "https://www.cbr-xml-daily.ru/daily_json.js"
 
 # =====================================================

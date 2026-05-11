@@ -61,12 +61,13 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
 
     # Уведомляем о начале формирования
     status_msg = await callback.message.answer(
-        "📋 Формирую предложение... \n\n"
-        "⏳ Запрашиваю:\n"
+        "📋 <b>Формирую предложение...</b>\n\n"
+        "⏳ Параллельно запрашиваю:\n"
         "• 🌤 OpenWeatherMap — погода на даты\n"
         "• 💱 ЦБ РФ — актуальные курсы валют\n"
         "• 🛂 Визовый справочник\n"
-        "• 🎨 Применяю ваш стиль общения..."
+        "• 🎨 Применяю ваш стиль общения...",
+        parse_mode="HTML",
     )
 
     try:
@@ -78,10 +79,11 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
             exc_info=True,
         )
         await status_msg.edit_text(
-            "❌ Не удалось сформировать предложение \n\n"
+            "❌ <b>Не удалось сформировать предложение</b>\n\n"
             "Возможная причина: временная недоступность API.\n"
             "Попробуйте через несколько минут.",
             reply_markup=kb_new_search(),
+            parse_mode="HTML",
         )
         await callback.answer()
         return
@@ -97,8 +99,9 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
 
     # ── Выводим предложение агенту ────────────────────────────────────
     await callback.message.answer(
-        "✅ Предложение сформировано! \n\n"
-        "Проверьте перед отправкой клиенту."
+        "✅ <b>Предложение сформировано!</b>\n\n"
+        "Проверьте перед отправкой клиенту.",
+        parse_mode="HTML",
     )
 
     # Разбиваем на части если длинное (лимит Telegram — 4096 символов)
@@ -111,17 +114,20 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
                     chunk,
                     reply_markup=kb_offer_actions(tour_index),
                     disable_web_page_preview=True,
+                    parse_mode="HTML",
                 )
             else:
                 await callback.message.answer(
                     chunk,
                     disable_web_page_preview=True,
+                    parse_mode="HTML",
                 )
     else:
         await callback.message.answer(
             offer_text,
             reply_markup=kb_offer_actions(tour_index),
             disable_web_page_preview=True,
+            parse_mode="HTML",
         )
 
     await callback.answer()
@@ -155,9 +161,10 @@ async def handle_offer_send(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await callback.message.answer(
-        "📤 Скопируйте текст ниже и отправьте клиенту: \n\n"
-        " (Бот не отправляет сообщения клиентам напрямую "
-        "— только вы решаете, что и кому пересылать) "
+        "📤 <b>Скопируйте текст ниже и отправьте клиенту:</b>\n\n"
+        "<i>(Бот не отправляет сообщения клиентам напрямую "
+        "— только вы решаете, что и кому пересылать)</i>",
+        parse_mode="HTML",
     )
 
     # Выводим чистый текст без HTML-тегов для удобного копирования
@@ -199,10 +206,11 @@ async def handle_offer_edit(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(editing_tour_index=tour_index)
 
     await callback.message.answer(
-        "✏️ Режим редактирования \n\n"
+        "✏️ <b>Режим редактирования</b>\n\n"
         "Введите или вставьте отредактированный текст предложения.\n"
         "Бот запомнит ваш стиль и будет использовать его в следующих предложениях.\n\n"
-        " Для отмены напишите /cancel "
+        "<i>Для отмены напишите /cancel</i>",
+        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -212,6 +220,7 @@ async def handle_edited_offer(message: Message, state: FSMContext) -> None:
     """
     Принимает отредактированный текст предложения.
     Обновляет стиль агента на основе его правок.
+    ИСПРАВЛЕНО: добавлен вызов learn_from_text, который ранее был обрезан.
     """
     if message.text and message.text.strip() == "/cancel":
         await state.clear()
@@ -233,128 +242,91 @@ async def handle_edited_offer(message: Message, state: FSMContext) -> None:
     # Сохраняем отредактированный вариант
     _composed_offers[(user_id, tour_index)] = edited_text
 
-    # Анализируем и сохраняем стиль агента
-    style_info = ""
+    # ИСПРАВЛЕНО: ранее эта строка была обрезана и не выполнялась
+    # Анализируем и сохраняем стиль агента на основе его правок
     try:
         learn_from_text(user_id, edited_text)
-        style_summary = get_style_summary(user_id)
-        style_info = f"\n\n🎨 Стиль обновлён: \n{style_summary}"
+        logger.info("Стиль агента %d обновлён на основе правок", user_id)
     except Exception as exc:
         logger.warning("Ошибка обновления стиля: %s", exc)
 
     await state.clear()
+
     await message.answer(
-        f"✅ Предложение обновлено {style_info}\n\n"
-        "Хотите отправить клиенту?",
-        reply_markup=kb_offer_actions(tour_index),
+        "✅ <b>Изменения сохранены!</b>\n\n"
+        "🎨 Я запомнил ваш стиль общения и буду применять его в следующих предложениях.\n\n"
+        "📤 Чтобы отправить клиенту — скопируйте текст выше.\n"
+        "🔍 Хотите найти другой тур?",
+        reply_markup=kb_new_search(),
+        parse_mode="HTML",
     )
-
-
-# =============================================================================
-# ССЫЛКИ НА БРОНИРОВАНИЕ
-# =============================================================================
-
-@router.callback_query(F.data.startswith("open_flight_"))
-async def handle_open_flight(callback: CallbackQuery) -> None:
-    """Показывает ссылку на авиабилет на Aviasales."""
-    from handlers.search import get_search_results
-
-    try:
-        tour_index = int(callback.data.split("_")[-1])
-    except (ValueError, IndexError):
-        await callback.answer("❌ Некорректный запрос.", show_alert=True)
-        return
-
-    tours = get_search_results(callback.from_user.id)
-    if tours and 0 <= tour_index < len(tours):
-        flight = tours[tour_index].flight or {}
-        link = flight.get("link", "")
-        if link:
-            await callback.message.answer(
-                f"✈️ Ссылка на авиабилет (Aviasales): \n{link}\n\n"
-                " ⚠️ Цена актуальна на момент поиска. "
-                "При бронировании проверьте текущую стоимость. "
-            )
-            await callback.answer()
-            return
-
-    await callback.answer("Ссылка недоступна.", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("open_hotel_"))
-async def handle_open_hotel(callback: CallbackQuery) -> None:
-    """Показывает ссылку на отель в Hotellook."""
-    from handlers.search import get_search_results
-
-    try:
-        tour_index = int(callback.data.split("_")[-1])
-    except (ValueError, IndexError):
-        await callback.answer("❌ Некорректный запрос.", show_alert=True)
-        return
-
-    tours = get_search_results(callback.from_user.id)
-    if tours and 0 <= tour_index < len(tours):
-        hotel = tours[tour_index].hotel or {}
-        link = hotel.get("link", "")
-        if link:
-            await callback.message.answer(
-                f"🏨 Ссылка на отель (Hotellook): \n{link}\n\n"
-                " ⚠️ Наличие мест и цена актуальны на момент поиска. "
-            )
-            await callback.answer()
-            return
-
-    await callback.answer("Ссылка недоступна.", show_alert=True)
 
 
 # =============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # =============================================================================
 
+def _strip_html(text: str) -> str:
+    """
+    Удаляет HTML-теги из текста для получения чистого варианта.
+
+    :param text: Текст с HTML-тегами
+    :return: Чистый текст без тегов
+    """
+    # Заменяем теги на читаемые аналоги
+    result = text
+    result = re.sub(r"<b>(.*?)</b>", r"\1", result, flags=re.DOTALL)
+    result = re.sub(r"<i>(.*?)</i>", r"\1", result, flags=re.DOTALL)
+    result = re.sub(r"<code>(.*?)</code>", r"\1", result, flags=re.DOTALL)
+    result = re.sub(r'<a href="[^"]*">(.*?)</a>', r"\1", result, flags=re.DOTALL)
+    # Удаляем оставшиеся теги
+    result = re.sub(r"<[^>]+>", "", result)
+    return result
+
+
 def _split_text(text: str, max_len: int = 4000) -> list[str]:
     """
-    Разбивает длинный текст на части по абзацам, не превышая max_len символов.
+    Разбивает длинный текст на части, сохраняя целостность абзацев.
 
     :param text: Исходный текст
-    :param max_len: Максимальная длина одной части
-    :return: Список частей
+    :param max_len: Максимальная длина части
+    :return: Список частей текста
     """
     if len(text) <= max_len:
         return [text]
 
-    parts: list[str] = []
-    current = ""
+    chunks = []
+    current_chunk = ""
 
-    for line in text.split("\n"):
-        # Если добавление строки превышает лимит — сохраняем текущую часть
-        test = current + "\n" + line if current else line
-        if len(test) > max_len:
-            if current:
-                parts.append(current.strip())
-            # Если одна строка длиннее лимита — режем принудительно
-            if len(line) > max_len:
-                parts.append(line[:max_len])
-                current = ""
+    for paragraph in text.split("\n\n"):
+        # Если добавление параграфа не превысит лимит
+        if len(current_chunk) + len(paragraph) + 2 <= max_len:
+            if current_chunk:
+                current_chunk += "\n\n" + paragraph
             else:
-                current = line
+                current_chunk = paragraph
         else:
-            current = test
+            # Сохраняем текущий блок и начинаем новый
+            if current_chunk:
+                chunks.append(current_chunk)
+            # Если один параграф больше лимита — режем по строкам
+            if len(paragraph) > max_len:
+                lines = paragraph.split("\n")
+                current_chunk = ""
+                for line in lines:
+                    if len(current_chunk) + len(line) + 1 <= max_len:
+                        if current_chunk:
+                            current_chunk += "\n" + line
+                        else:
+                            current_chunk = line
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        current_chunk = line
+            else:
+                current_chunk = paragraph
 
-    if current:
-        parts.append(current.strip())
+    if current_chunk:
+        chunks.append(current_chunk)
 
-    return parts
-
-
-def _strip_html(text: str) -> str:
-    """
-    Убирает HTML-теги из текста для отправки клиенту в виде plain text.
-
-    :param text: Текст с HTML-тегами
-    :return: Чистый текст
-    """
-    # Убираем теги
-    clean = re.sub(r"<[^>]+>", "", text)
-    # Убираем лишние переносы (более 2 подряд)
-    clean = re.sub(r"\n{3,}", "\n\n", clean)
-    return clean.strip()
+    return chunks

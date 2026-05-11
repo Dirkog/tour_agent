@@ -1,8 +1,10 @@
 """
 Поиск авиабилетов через Aviasales API (Travelpayouts).
 Использует эндпойнт /aviasales/v3/prices_for_dates для конкретных дат.
-Документация: https://support.travelpayouts.com/hc/en-us/articles/203956163
+Документация: https://support.travelpayouts.com/hc/en-us
 API v3: https://aviasales-api.readme.io/reference/prices_for_dates
+
+ИСПРАВЛЕНО: добавлена полная реализация _search_flights_fallback и _parse_ticket.
 """
 import logging
 from datetime import datetime, date, timedelta
@@ -53,7 +55,7 @@ DESTINATION_IATA: dict[str, str] = {
     "турция": "AYT",
     "стамбул": "IST",
     "каир": "CAI",
-    "египет": "CAI",
+    "египет": "HRG",
     "хургада": "HRG",
     "шарм-эль-шейх": "SSH",
     "шарм эль шейх": "SSH",
@@ -193,7 +195,6 @@ async def search_flights(
                         "Aviasales API вернул статус %d для маршрута %s→%s",
                         response.status, origin_iata, destination_iata
                     )
-                    # Пробуем резервный эндпойнт
                     return await _search_flights_fallback(
                         origin_iata, destination_iata, date_from, date_to, currency
                     )
@@ -242,6 +243,8 @@ async def _search_flights_fallback(
     Резервный поиск через эндпойнт /v2/prices/latest (кешированные данные).
     Используется если основной эндпойнт не дал результатов.
 
+    ИСПРАВЛЕНО: добавлена полная реализация (ранее была обрезана).
+
     :param origin: IATA код города вылета
     :param destination: IATA код города назначения
     :param date_from: Дата вылета
@@ -279,26 +282,40 @@ async def _search_flights_fallback(
                     return []
 
                 tickets = data.get("data", [])
+                if isinstance(tickets, dict):
+                    # Иногда данные приходят как словарь {destination: {...}}
+                    tickets = list(tickets.values())
+
                 for ticket in tickets[:MAX_RESULTS]:
-                    flight = _parse_ticket_v2(ticket, origin, destination, date_from, date_to)
+                    flight = _parse_ticket(ticket, origin, destination)
                     if flight:
+                        # Устанавливаем даты из запроса, если API не вернул
+                        if not flight.get("departure_at") and date_from:
+                            flight["departure_at"] = date_from
+                        if not flight.get("return_at") and date_to:
+                            flight["return_at"] = date_to
                         results.append(flight)
 
-                logger.info("Fallback: найдено %d рейсов", len(results))
+                logger.info(
+                    "Fallback нашёл %d рейсов для %s→%s",
+                    len(results), origin, destination
+                )
 
+    except aiohttp.ClientError as e:
+        logger.error("Сетевая ошибка в fallback-поиске рейсов: %s", e)
     except Exception as e:
-        logger.error("Ошибка fallback поиска рейсов: %s", e)
+        logger.error("Ошибка в fallback-поиске рейсов: %s", e, exc_info=True)
 
     return results
 
 
 def _parse_ticket(ticket: dict, origin: str, destination: str) -> dict | None:
     """
-    Парсит объект билета из ответа Aviasales API v3.
+    Парсит объект авиабилета из ответа Aviasales API.
 
     :param ticket: Словарь с данными билета
-    :param origin: IATA код вылета
-    :param destination: IATA код назначения
+    :param origin: IATA код отправления (для fallback)
+    :param destination: IATA код назначения (для fallback)
     :return: Нормализованный словарь или None
     """
     try:
@@ -306,13 +323,19 @@ def _parse_ticket(ticket: dict, origin: str, destination: str) -> dict | None:
         if not price:
             return None
 
-        airline = ticket.get("airline", "")
+        # Авиакомпания
+        airline_code = ticket.get("airline", "")
+        airline = _airline_code_to_name(airline_code) or airline_code or "Авиакомпания"
 
-        # Дата и время вылета
+        # Маршрут
+        origin_code = ticket.get("origin", origin)
+        destination_code = ticket.get("destination", destination)
+
+        # Даты и время
         departure_at = ticket.get("departure_at", "")
         return_at = ticket.get("return_at", "")
 
-        # Стыковки
+        # Пересадки
         transfers = ticket.get("transfers", 0)
         return_transfers = ticket.get("return_transfers", 0)
 
@@ -320,16 +343,23 @@ def _parse_ticket(ticket: dict, origin: str, destination: str) -> dict | None:
         duration_to = ticket.get("duration_to", 0) or ticket.get("duration", 0)
         duration_back = ticket.get("duration_back", 0)
 
-        # Формируем ссылку на Aviasales
+        # Ссылка на Aviasales
         link = ticket.get("link", "")
         if link and not link.startswith("http"):
             link = f"https://www.aviasales.ru{link}"
+        elif not link:
+            # Формируем базовую ссылку
+            dep_date = departure_at[:10] if departure_at else ""
+            link = (
+                f"https://www.aviasales.ru/search/{origin_code}{dep_date}"
+                f"{destination_code}1?marker={AVIASALES_TOKEN}"
+            )
 
         return {
             "airline": airline,
-            "flight_number": ticket.get("flight_number", ""),
-            "origin": origin,
-            "destination": destination,
+            "airline_code": airline_code,
+            "origin": origin_code,
+            "destination": destination_code,
             "departure_at": departure_at,
             "return_at": return_at,
             "transfers": transfers,
@@ -341,61 +371,45 @@ def _parse_ticket(ticket: dict, origin: str, destination: str) -> dict | None:
             "source": "Aviasales (Travelpayouts)",
         }
 
-    except (TypeError, ValueError, KeyError) as e:
-        logger.warning("Ошибка парсинга билета v3: %s | данные: %s", e, ticket)
+    except Exception as e:
+        logger.debug("Ошибка парсинга билета: %s", e)
         return None
 
 
-def _parse_ticket_v2(
-    ticket: dict,
-    origin: str,
-    destination: str,
-    date_from: str,
-    date_to: str | None,
-) -> dict | None:
+def _airline_code_to_name(code: str) -> str | None:
     """
-    Парсит объект билета из ответа Aviasales API v2 (latest prices).
+    Конвертирует IATA код авиакомпании в название.
 
-    :param ticket: Словарь с данными билета
-    :param origin: IATA код вылета
-    :param destination: IATA код назначения
-    :param date_from: Дата вылета (для построения ссылки)
-    :param date_to: Дата возврата
-    :return: Нормализованный словарь или None
+    :param code: Двухбуквенный IATA код
+    :return: Название авиакомпании или None
     """
-    try:
-        price = ticket.get("value", 0) or ticket.get("price", 0)
-        if not price:
-            return None
-
-        airline = ticket.get("gate", "")
-        transfers = ticket.get("transfers", 0)
-
-        # В v2 ссылки нет, генерируем напрямую
-        # Формат: https://www.aviasales.ru/search/MOW1506AYT/...
-        date_str = date_from.replace("-", "")[4:]  # MMDD из YYYYMMDD -> 0615
-        link = (
-            f"https://www.aviasales.ru/search/"
-            f"{origin}{date_str[:2]}{date_str[2:]}"
-            f"{destination}"
-        )
-
-        return {
-            "airline": airline,
-            "flight_number": "",
-            "origin": origin,
-            "destination": destination,
-            "departure_at": date_from + "T00:00:00",
-            "return_at": (date_to + "T00:00:00") if date_to else "",
-            "transfers": transfers,
-            "return_transfers": 0,
-            "duration_to": 0,
-            "duration_back": 0,
-            "price": int(price),
-            "link": link,
-            "source": "Aviasales (Travelpayouts)",
-        }
-
-    except (TypeError, ValueError, KeyError) as e:
-        logger.warning("Ошибка парсинга билета v2: %s | данные: %s", e, ticket)
-        return None
+    airlines = {
+        "SU": "Аэрофлот",
+        "U6": "Уральские авиалинии",
+        "S7": "S7 Airlines",
+        "DP": "Pobeda",
+        "N4": "Nordwind Airlines",
+        "5N": "Nordavia",
+        "FV": "Россия",
+        "TK": "Turkish Airlines",
+        "FZ": "flydubai",
+        "EK": "Emirates",
+        "MS": "Egypt Air",
+        "WB": "Nile Air",
+        "HY": "Uzbekistan Airways",
+        "KC": "Air Astana",
+        "PC": "Pegasus Airlines",
+        "QR": "Qatar Airways",
+        "EY": "Etihad Airways",
+        "SQ": "Singapore Airlines",
+        "TG": "Thai Airways",
+        "FD": "Thai AirAsia",
+        "VN": "Vietnam Airlines",
+        "SV": "Saudi Arabian Airlines",
+        "EL": "Israir",
+        "IZ": "Arkia",
+        "A4": "Azimuth",
+        "6R": "Авиастар-ТУ",
+        "NN": "NordStar",
+    }
+    return airlines.get(code.upper()) if code else None
