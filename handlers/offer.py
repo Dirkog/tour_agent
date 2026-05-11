@@ -1,10 +1,10 @@
 """
 Обработчик работы с готовым коммерческим предложением.
 Формирует, редактирует и выводит предложение агенту.
-Агент сам решает, пересылать ли его клиенту.
+Агент сам решает, пересылать ли его клиенту. Бот никогда не пишет клиентам напрямую.
 """
-
 import logging
+import re
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 # Роутер для работы с предложениями
 router = Router()
 
-# Временное хранилище сформированных предложений
-# Ключ: (user_id, tour_index) -> текст предложения
+# Временное хранилище сформированных предложений в памяти
+# Ключ: (user_id, tour_index) -> текст предложения (HTML)
 _composed_offers: dict[tuple[int, int], str] = {}
 
 
@@ -33,17 +33,22 @@ _composed_offers: dict[tuple[int, int], str] = {}
 async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Запускает формирование коммерческого предложения.
-    Получает тур из результатов поиска, добавляет погоду,
-    курсы валют, визовую информацию и применяет стиль агента.
+    Получает тур из результатов поиска, добавляет погоду, курсы валют,
+    визовую информацию и применяет стиль агента.
     """
+    # Импорт здесь, чтобы избежать циклических зависимостей
     from handlers.search import get_search_results
 
-    tour_index = int(callback.data.split("_")[-1])
+    try:
+        tour_index = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Некорректный запрос.", show_alert=True)
+        return
+
     user_id = callback.from_user.id
 
-    # Получаем результаты поиска
+    # Получаем результаты поиска из памяти
     tours = get_search_results(user_id)
-
     if not tours or tour_index >= len(tours):
         await callback.answer(
             "❌ Результаты поиска устарели. Выполните новый поиск.",
@@ -58,20 +63,18 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
         "📋 <b>Формирую предложение...</b>\n\n"
         "⏳ Запрашиваю:\n"
         "• 🌤 OpenWeatherMap — погода на даты\n"
-        "• 💱 ЦБ РФ — актуальные курсы\n"
+        "• 💱 ЦБ РФ — актуальные курсы валют\n"
         "• 🛂 Визовый справочник\n"
         "• 🎨 Применяю ваш стиль общения..."
     )
 
     try:
-        offer_text = await compose_offer(
-            tour=tour,
-            agent_id=user_id,
-        )
+        offer_text = await compose_offer(tour=tour, agent_id=user_id)
     except Exception as exc:
         logger.error(
-            "Ошибка формирования предложения для user=%d, tour=%d: %s",
-            user_id, tour_index, exc, exc_info=True,
+            "Ошибка формирования предложения: user=%d, tour=%d, err=%s",
+            user_id, tour_index, exc,
+            exc_info=True,
         )
         await status_msg.edit_text(
             "❌ <b>Не удалось сформировать предложение</b>\n\n"
@@ -82,7 +85,7 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
         await callback.answer()
         return
 
-    # Сохраняем предложение
+    # Сохраняем предложение в памяти
     _composed_offers[(user_id, tour_index)] = offer_text
 
     # Удаляем статусное сообщение
@@ -91,13 +94,13 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
     except Exception:
         pass
 
-    # ── Выводим предложение агенту ────────────────────────────────
+    # ── Выводим предложение агенту ──────────────────────────────────
     await callback.message.answer(
-        "✅ <b>Предложение сформировано:</b>\n\n"
-        "Проверьте перед отправкой клиенту.",
+        "✅ <b>Предложение сформировано!</b>\n\n"
+        "Проверьте перед отправкой клиенту."
     )
 
-    # Само предложение — разбиваем если длинное
+    # Разбиваем на части если длинное (лимит Telegram — 4096 символов)
     if len(offer_text) > 4000:
         chunks = _split_text(offer_text, max_len=4000)
         for i, chunk in enumerate(chunks):
@@ -131,11 +134,16 @@ async def handle_compose_offer(callback: CallbackQuery, state: FSMContext) -> No
 async def handle_offer_send(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Агент решил отправить предложение клиенту.
-    Бот выводит инструкцию — сам НЕ отправляет клиенту напрямую.
+    Бот выводит инструкцию и чистый текст для копирования.
+    Сам НЕ отправляет клиенту напрямую — только агент.
     """
-    tour_index = int(callback.data.split("_")[-1])
-    user_id = callback.from_user.id
+    try:
+        tour_index = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Некорректный запрос.", show_alert=True)
+        return
 
+    user_id = callback.from_user.id
     offer_text = _composed_offers.get((user_id, tour_index))
 
     if not offer_text:
@@ -151,12 +159,19 @@ async def handle_offer_send(callback: CallbackQuery, state: FSMContext) -> None:
         "— только вы решаете, что и кому пересылать)</i>"
     )
 
-    # Выводим готовый текст для копирования
-    # Удаляем HTML-теги для «чистого» текста клиенту
+    # Выводим чистый текст без HTML-тегов для удобного копирования
     clean_text = _strip_html(offer_text)
-    await callback.message.answer(clean_text, disable_web_page_preview=True)
+
+    # Разбиваем если длинное
+    if len(clean_text) > 4000:
+        chunks = _split_text(clean_text, max_len=4000)
+        for chunk in chunks:
+            await callback.message.answer(chunk, disable_web_page_preview=True)
+    else:
+        await callback.message.answer(clean_text, disable_web_page_preview=True)
+
     await callback.message.answer(
-        "✅ Текст скопирован? Отправьте его в удобном мессенджере.\n\n"
+        "✅ Текст скопирован? Отправьте его клиенту в удобном мессенджере.\n\n"
         "🔍 Хотите найти другие варианты?",
         reply_markup=kb_new_search(),
     )
@@ -171,9 +186,14 @@ async def handle_offer_send(callback: CallbackQuery, state: FSMContext) -> None:
 async def handle_offer_edit(callback: CallbackQuery, state: FSMContext) -> None:
     """
     Переводит бота в режим ожидания отредактированного текста.
-    После ввода — обновляет стиль агента.
+    После ввода обновляет стиль агента.
     """
-    tour_index = int(callback.data.split("_")[-1])
+    try:
+        tour_index = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Некорректный запрос.", show_alert=True)
+        return
+
     await state.set_state(OfferStates.EDITING_OFFER)
     await state.update_data(editing_tour_index=tour_index)
 
@@ -192,7 +212,7 @@ async def handle_edited_offer(message: Message, state: FSMContext) -> None:
     Принимает отредактированный текст предложения.
     Обновляет стиль агента на основе его правок.
     """
-    if message.text == "/cancel":
+    if message.text and message.text.strip() == "/cancel":
         await state.clear()
         await message.answer(
             "❌ Редактирование отменено.",
@@ -201,24 +221,28 @@ async def handle_edited_offer(message: Message, state: FSMContext) -> None:
         return
 
     edited_text = message.text or ""
-    user_id = message.from_user.id
+    if not edited_text.strip():
+        await message.answer("Введите текст предложения.")
+        return
 
+    user_id = message.from_user.id
     data = await state.get_data()
     tour_index = data.get("editing_tour_index", 0)
 
     # Сохраняем отредактированный вариант
     _composed_offers[(user_id, tour_index)] = edited_text
 
-    # Анализируем стиль агента
+    # Анализируем и сохраняем стиль агента
+    style_info = ""
     try:
         learn_from_text(user_id, edited_text)
         style_summary = get_style_summary(user_id)
         style_info = f"\n\n🎨 <b>Стиль обновлён:</b>\n{style_summary}"
     except Exception as exc:
         logger.warning("Ошибка обновления стиля: %s", exc)
-        style_info = ""
 
     await state.clear()
+
     await message.answer(
         f"✅ <b>Предложение обновлено</b>{style_info}\n\n"
         "Хотите отправить клиенту?",
@@ -227,7 +251,7 @@ async def handle_edited_offer(message: Message, state: FSMContext) -> None:
 
 
 # =============================================================================
-# ОТКРЫТЬ ССЫЛКИ НА БРОНИРОВАНИЕ
+# ССЫЛКИ НА БРОНИРОВАНИЕ
 # =============================================================================
 
 @router.callback_query(F.data.startswith("open_flight_"))
@@ -235,12 +259,16 @@ async def handle_open_flight(callback: CallbackQuery) -> None:
     """Показывает ссылку на авиабилет на Aviasales."""
     from handlers.search import get_search_results
 
-    tour_index = int(callback.data.split("_")[-1])
-    tours = get_search_results(callback.from_user.id)
+    try:
+        tour_index = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Некорректный запрос.", show_alert=True)
+        return
 
-    if tours and tour_index < len(tours):
-        tour = tours[tour_index]
-        link = getattr(tour, "flight_link", None)
+    tours = get_search_results(callback.from_user.id)
+    if tours and 0 <= tour_index < len(tours):
+        flight = tours[tour_index].flight or {}
+        link = flight.get("link", "")
         if link:
             await callback.message.answer(
                 f"✈️ <b>Ссылка на авиабилет (Aviasales):</b>\n{link}\n\n"
@@ -258,12 +286,16 @@ async def handle_open_hotel(callback: CallbackQuery) -> None:
     """Показывает ссылку на отель в Hotellook."""
     from handlers.search import get_search_results
 
-    tour_index = int(callback.data.split("_")[-1])
-    tours = get_search_results(callback.from_user.id)
+    try:
+        tour_index = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Некорректный запрос.", show_alert=True)
+        return
 
-    if tours and tour_index < len(tours):
-        tour = tours[tour_index]
-        link = getattr(tour, "hotel_link", None)
+    tours = get_search_results(callback.from_user.id)
+    if tours and 0 <= tour_index < len(tours):
+        hotel = tours[tour_index].hotel or {}
+        link = hotel.get("link", "")
         if link:
             await callback.message.answer(
                 f"🏨 <b>Ссылка на отель (Hotellook):</b>\n{link}\n\n"
@@ -280,19 +312,26 @@ async def handle_open_hotel(callback: CallbackQuery) -> None:
 # =============================================================================
 
 def _split_text(text: str, max_len: int = 4000) -> list[str]:
-    """Разбивает длинный текст на части по абзацам."""
+    """
+    Разбивает длинный текст на части по абзацам, не превышая max_len символов.
+
+    :param text: Исходный текст
+    :param max_len: Максимальная длина одной части
+    :return: Список частей
+    """
     if len(text) <= max_len:
         return [text]
 
-    parts = []
+    parts: list[str] = []
     current = ""
+
     for line in text.split("\n"):
         if len(current) + len(line) + 1 > max_len:
             if current:
                 parts.append(current.strip())
             current = line
         else:
-            current += "\n" + line if current else line
+            current = current + "\n" + line if current else line
 
     if current:
         parts.append(current.strip())
@@ -301,9 +340,14 @@ def _split_text(text: str, max_len: int = 4000) -> list[str]:
 
 
 def _strip_html(text: str) -> str:
-    """Убирает HTML-теги из текста для отправки клиенту."""
-    import re
+    """
+    Убирает HTML-теги из текста для отправки клиенту в виде plain text.
+
+    :param text: Текст с HTML-тегами
+    :return: Чистый текст
+    """
+    # Убираем теги
     clean = re.sub(r"<[^>]+>", "", text)
-    # Убираем двойные переносы
+    # Убираем лишние переносы (более 2 подряд)
     clean = re.sub(r"\n{3,}", "\n\n", clean)
     return clean.strip()
